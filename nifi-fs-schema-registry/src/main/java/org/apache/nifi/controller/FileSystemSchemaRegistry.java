@@ -27,12 +27,24 @@ import java.util.Set;
 
 public class FileSystemSchemaRegistry extends AbstractControllerService implements SchemaRegistry {
     private static final Set<SchemaField> schemaFields = EnumSet.of(SchemaField.SCHEMA_NAME, SchemaField.SCHEMA_TEXT, SchemaField.SCHEMA_TEXT_FORMAT);
-    private Map<String, RecordSchema> schemas;
+    private Map<String, String> schemas;
 
     @Override
     public RecordSchema retrieveSchema(SchemaIdentifier schemaIdentifier) throws IOException, SchemaNotFoundException {
         if (schemaIdentifier.getName().isPresent() && schemas.containsKey(schemaIdentifier.getName().get())) {
-            return schemas.get(schemaIdentifier.getName().get());
+            String path = schemas.get(schemaIdentifier.getName().get());
+            try {
+                FileInputStream fis = new FileInputStream(path);
+                String raw = IOUtils.toString(fis, "UTF-8");
+                fis.close();
+
+                final Schema avroSchema = new Schema.Parser().parse(raw);
+                RecordSchema schema = AvroTypeUtil.createSchema(avroSchema, raw, SchemaIdentifier.EMPTY);
+
+                return schema;
+            } catch (Exception ex) {
+                throw new ProcessException(ex);
+            }
         }
 
         return null;
@@ -84,19 +96,10 @@ public class FileSystemSchemaRegistry extends AbstractControllerService implemen
 
     @OnEnabled
     public void onEnabled(ConfigurationContext context) {
-        final Map<String, RecordSchema> _temp = new HashMap<>();
+        final Map<String, String> _temp = new HashMap<>();
         context.getProperties().entrySet().stream().forEach(entry -> {
-            String path = context.getProperty(entry.getKey()).getValue();
-            try {
-                FileInputStream fis = new FileInputStream(path);
-                String raw = IOUtils.toString(fis, "UTF-8");
-                fis.close();
-
-                final Schema avroSchema = new Schema.Parser().parse(raw);
-                RecordSchema schema = AvroTypeUtil.createSchema(avroSchema, raw, SchemaIdentifier.EMPTY);
-                _temp.put(entry.getValue(), schema);
-            } catch (Exception ex) {
-                throw new ProcessException(ex);
+            if (entry.getKey().isDynamic()) {
+                _temp.put(entry.getKey().getName(), entry.getValue());
             }
         });
 
